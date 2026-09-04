@@ -13,34 +13,38 @@ no control center. Click-through everywhere except the pet itself.
 
 Compatible with the Codex/OpenPets pet package format, so pets from
 [OpenPets](https://openpets.dev), [Petdex](https://petdex.dev), and
-[Codex Pets](https://codex-pets.net) all work. Ships with
-[Yuzu](https://openpets.dev) (an OpenPets Original) as the default pet.
+[Codex Pets](https://codex-pets.net) all work.
 
 ## Install
 
 ```bash
 omarchy plugin add https://github.com/happylemonprogramming/deskpet.git --enable --yes
+npx -y install-pet cloud-puff
 ```
 
-The pet appears immediately along the bottom of your screen.
+No pet art ships with the plugin; the second command installs Cloud Puff
+(the default) using the official OpenPets installer. Any pet id from the
+[OpenPets gallery](https://openpets.dev) works, and the pet appears along
+the bottom of your screen as soon as one is installed.
 
 ## Install more pets
 
 ```bash
-~/.config/omarchy/plugins/deskpet/bin/install-pet fenne-fox      # OpenPets id
-~/.config/omarchy/plugins/deskpet/bin/install-pet <zip-url>      # any pet ZIP
+npx -y install-pet ribbit-scout                                  # OpenPets id
+~/.config/omarchy/plugins/deskpet/bin/install-pet <id|zip-url>   # no Node needed
 ```
 
 Right-click the pet (or `omarchy-shell deskpet next`) to cycle through
-installed pets. Pets installed by the OmaPets bar widget
-(`~/.config/omapets/pets`) are picked up too.
+installed pets. Deskpet finds pets installed by the OpenPets CLI
+(`~/.config/OpenPets/pets`), the OmaPets bar widget (`~/.config/omapets/pets`),
+and its own installer (`~/.local/share/deskpet/pets`).
 
 ## Interactions
 
 | Input | Effect |
 |---|---|
 | Left click | Pet it (hearts) |
-| Drag | Carry it anywhere along the bottom strip; it bounces back to the floor |
+| Drag | Carry it anywhere on screen; it bounces back down to the floor |
 | Right click | Switch to the next installed pet |
 | Middle click | Preview the success reaction |
 
@@ -106,13 +110,15 @@ Stored inline on the plugin entry in `~/.config/omarchy/shell.json`
 (hot-reloads on save):
 
 ```json
-{ "id": "deskpet", "scale": 1.0, "frameIntervalMs": 140, "bottomMargin": 0, "petPath": "" }
+{ "id": "deskpet", "scale": 1.0, "frameIntervalMs": 140, "bottomMargin": 0, "petPath": "cloud-puff" }
 ```
 
 - `scale` — pet size multiplier (0.4–3.0)
-- `frameIntervalMs` — animation speed
+- `frameIntervalMs` — animation speed scale (140 = normal; lower is faster)
 - `bottomMargin` — lift the pet above a bottom bar
-- `petPath` — pet id (in `~/.local/share/deskpet/pets`) or absolute folder path; empty = bundled Yuzu
+- `petPath` — pet id (searched across all pets directories) or absolute
+  folder path; defaults to `cloud-puff`. If the configured pet is not
+  installed, deskpet adopts the first installed pet it finds.
 
 ## Credits
 
@@ -122,7 +128,8 @@ Stored inline on the plugin entry in `~/.config/omarchy/shell.json`
 - Hook event mapping inspired by the MIT-licensed
   [OmaPets](https://github.com/yesmeck/OmaPets) bar widget; deskpet reads its
   status file for zero-config compatibility.
-- Default pet: Yuzu, an OpenPets Original. Pets installed from public
-  catalogs may be fan-made content; see each catalog's terms.
+- Pet installs use the official [`install-pet`](https://www.npmjs.com/package/install-pet)
+  npm CLI or the bundled script. Pets installed from public catalogs may be
+  fan-made content; see each catalog's terms.
 
 MIT licensed.

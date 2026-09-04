@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install a pet package for deskpet.
 #
-#   install-pet <openpets-id>     e.g. install-pet fenne-fox
+#   install-pet <openpets-id>     e.g. install-pet ribbit-scout
 #   install-pet <zip-url>         any URL to a pet ZIP (pet.json + spritesheet)
 #
 # Pets land in ~/.local/share/deskpet/pets/<id>/. The OpenPets catalog is

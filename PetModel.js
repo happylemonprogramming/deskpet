@@ -9,16 +9,19 @@ var FRAME_W = 192
 var FRAME_H = 208
 var COLUMNS = 8
 
+// Frame counts are the populated cells per row (trailing cells in a row can
+// be blank in the atlas; cycling into them makes the pet vanish). frameMs is
+// per-animation so a run cycles briskly while idle breathes slowly.
 var SPRITES = {
-  idle:     { row: 0, frames: 6 },
-  runRight: { row: 1, frames: 8 },
-  runLeft:  { row: 2, frames: 8 },
-  wave:     { row: 3, frames: 6 },
-  jump:     { row: 4, frames: 6 },
-  failed:   { row: 5, frames: 8 },
-  waiting:  { row: 6, frames: 6 },
-  active:   { row: 7, frames: 6 },
-  review:   { row: 8, frames: 6 }
+  idle:     { row: 0, frames: 6, frameMs: 170 },
+  runRight: { row: 1, frames: 8, frameMs: 90 },
+  runLeft:  { row: 2, frames: 8, frameMs: 90 },
+  wave:     { row: 3, frames: 4, frameMs: 160 },
+  jump:     { row: 4, frames: 5, frameMs: 120 },
+  failed:   { row: 5, frames: 8, frameMs: 150 },
+  waiting:  { row: 6, frames: 6, frameMs: 168 },
+  active:   { row: 7, frames: 6, frameMs: 140 },
+  review:   { row: 8, frames: 6, frameMs: 170 }
 }
 
 // What the pet is doing -> which atlas animation plays. "Actions" are pet

@@ -37,7 +37,7 @@ Item {
   readonly property real petScale: Math.max(0.4, Math.min(3, Number(setting("scale", 1.0))))
   readonly property int frameInterval: Math.max(60, Number(setting("frameIntervalMs", 140)))
   readonly property int bottomMargin: Math.max(0, Number(setting("bottomMargin", 0)))
-  readonly property string configuredPet: String(setting("petPath", ""))
+  readonly property string configuredPet: String(setting("petPath", "cloud-puff"))
   readonly property bool startVisible: setting("visible", true) !== false
 
   // ------------------------------------------------------------ pet package
@@ -46,8 +46,11 @@ Item {
   readonly property string dataHome: Quickshell.env("XDG_DATA_HOME") || home + "/.local/share"
   readonly property string stateHome: Quickshell.env("XDG_STATE_HOME") || home + "/.local/state"
   readonly property string petsHome: dataHome + "/deskpet/pets"
-  // Pets installed by the OmaPets bar widget load too; same sprite format.
-  readonly property string compatPetsHome: (Quickshell.env("XDG_CONFIG_HOME") || home + "/.config") + "/omapets/pets"
+  // Pets installed by the OmaPets bar widget and by the official OpenPets
+  // CLI (`npx -y install-pet <id>`) load too; all share the sprite format.
+  readonly property string configHome: Quickshell.env("XDG_CONFIG_HOME") || home + "/.config"
+  readonly property string compatPetsHome: configHome + "/omapets/pets"
+  readonly property string openPetsHome: configHome + "/OpenPets/pets"
 
   function filePath(url) {
     return decodeURIComponent(String(url || "").replace(/^file:\/\//, ""))
@@ -59,24 +62,36 @@ Item {
     return value
   }
 
-  readonly property string bundledPetDir: filePath(Qt.resolvedUrl("assets/pets/yuzu-golden-kitten"))
-  // A bare id resolves inside petsHome first; when its manifest fails to
-  // load we retry the OmaPets directory before giving up.
-  property string petDirOverride: ""
-  readonly property string resolvedPetDir: {
+  // No pet ships with the plugin: when petPath is empty or the configured
+  // pet is not installed, we adopt the first pet found in the scan
+  // directories. A bare id is resolved by the scanner, which lists every
+  // installed pet dir in priority order: ours, OmaPets', the OpenPets CLI's.
+  property string fallbackPetDir: ""
+  property string resolvedBareDir: ""
+  property bool petResolveFailed: false
+  readonly property string effectivePetDir: {
     var p = expandHome(configuredPet)
-    if (p === "") return bundledPetDir
-    if (p.indexOf("/") < 0) return petsHome + "/" + p
+    if (p === "" || petResolveFailed) return fallbackPetDir
+    if (p.indexOf("/") < 0) return resolvedBareDir
     return p.replace(/\/$/, "")
   }
-  readonly property string effectivePetDir: petDirOverride !== "" ? petDirOverride : resolvedPetDir
+
+  function resolveConfiguredPet() {
+    var p = expandHome(configuredPet)
+    if (p === "") scanPets("adopt")
+    else if (p.indexOf("/") < 0) scanPets("resolve")
+  }
 
   property bool petAvailable: false
   property string petName: ""
   property int atlasRows: 9
   property url spritesheetUrl: ""
 
-  onConfiguredPetChanged: petDirOverride = ""
+  onConfiguredPetChanged: {
+    petResolveFailed = false
+    resolvedBareDir = ""
+    resolveConfiguredPet()
+  }
 
   Loader {
     id: petManifestLoader
@@ -88,14 +103,13 @@ Item {
       printErrors: false
       onFileChanged: reload()
       onLoadFailed: {
-        // Bare pet ids fall back to the OmaPets-installed pets directory.
-        if (root.petDirOverride === "" && root.configuredPet !== ""
-            && root.configuredPet.indexOf("/") < 0) {
-          root.petDirOverride = root.compatPetsHome + "/" + root.configuredPet
-          return
-        }
         root.petAvailable = false
         root.spritesheetUrl = ""
+        // Configured pet is not installed anywhere: adopt any installed pet.
+        if (!root.petResolveFailed && root.expandHome(root.configuredPet) !== "") {
+          root.petResolveFailed = true
+          root.scanPets("adopt")
+        }
       }
       onLoaded: {
         try {
@@ -126,20 +140,23 @@ Item {
   property int currentFrame: 0
   property int spriteRow: 0
   property int spriteFrames: 6
+  property int spriteFrameMs: 170
   property bool greeted: false
 
   readonly property real frameH: 140 * petScale
   readonly property real frameW: frameH * PetModel.FRAME_W / PetModel.FRAME_H
-  readonly property real bubbleHeadroom: 96
-  readonly property real stripHeight: frameH * 2 + bubbleHeadroom + bottomMargin
+  // The frameIntervalMs setting acts as a speed scale relative to the
+  // per-animation defaults (140 = normal speed).
+  readonly property real speedScale: frameInterval / 140
 
-  function floorY() { return stripHeight - frameH - bottomMargin }
+  function floorY() { return Math.max(0, panel.height - frameH - bottomMargin) }
 
   function setAction(name) {
     action = name
     var sprite = PetModel.spriteFor(name)
     spriteRow = sprite.row
     spriteFrames = sprite.frames
+    spriteFrameMs = sprite.frameMs
     currentFrame = 0
   }
 
@@ -205,6 +222,9 @@ Item {
       var ageSec = Date.now() / 1000 - epoch
       if (!(epoch > 0) || ageSec > 14400 || epoch <= lastStatusEpoch) return
       var state = PetModel.normalizeState(status.state)
+      // One-shot states are only meaningful live; don't replay them when a
+      // reload re-reads an old status file.
+      if ((state === "success" || state === "error") && ageSec > 30) return
       var hold = state === "success" ? 6000 : (state === "error" ? 10000 : 0)
       setAgentState(state, status.detail, hold, epoch)
     } catch (ignored) {}
@@ -231,29 +251,37 @@ Item {
     onTriggered: bubble.shown = false
   }
 
-  // Frame clock: advances the sprite and, while a walk action is active,
-  // moves the pet. Runs only while the pet is actually on screen.
+  // Frame clock: advances the sprite at the active animation's own rate.
+  // Runs only while the pet is actually on screen.
   Timer {
     id: frameTimer
-    interval: root.frameInterval
+    interval: Math.max(50, Math.round(root.spriteFrameMs * root.speedScale))
     repeat: true
     running: root.petVisible && root.petAvailable
+    onTriggered: root.currentFrame = (root.currentFrame + 1) % root.spriteFrames
+  }
+
+  // Movement clock: slides the pet smoothly while a walk action is active,
+  // independent of the sprite frame rate so motion never looks steppy.
+  Timer {
+    id: moveTimer
+    interval: 33
+    repeat: true
+    running: root.petVisible && root.petAvailable && PetModel.isWalking(root.action)
+             && !dragArea.drag.active && !fallAnim.running
     onTriggered: {
-      root.currentFrame = (root.currentFrame + 1) % root.spriteFrames
-      if (PetModel.isWalking(root.action) && !dragArea.drag.active && !fallAnim.running) {
-        var step = (root.agentState === "working" ? 9 : 5) * root.petScale
-        var dx = root.action === "walkRight" ? step : -step
-        var next = petBody.x + dx
-        var maxX = panel.width - root.frameW
-        if (next <= 0) {
-          next = 0
-          root.setAction("walkRight")
-        } else if (next >= maxX) {
-          next = maxX
-          root.setAction("walkLeft")
-        }
-        petBody.x = next
+      var speed = (root.agentState === "working" ? 64 : 36) * root.petScale
+      var dx = speed * interval / 1000
+      var next = petBody.x + (root.action === "walkRight" ? dx : -dx)
+      var maxX = panel.width - root.frameW
+      if (next <= 0) {
+        next = 0
+        root.setAction("walkRight")
+      } else if (next >= maxX) {
+        next = maxX
+        root.setAction("walkLeft")
       }
+      petBody.x = next
     }
   }
 
@@ -302,49 +330,73 @@ Item {
   // ------------------------------------------------------- pet switching
 
   property var availablePets: []
+  property string scanPurpose: "cycle"
 
   Process {
     id: petScanner
     running: false
-    command: [root.filePath(Qt.resolvedUrl("bin/scan-pets")), root.petsHome, root.compatPetsHome]
+    command: [root.filePath(Qt.resolvedUrl("bin/scan-pets")), root.petsHome, root.compatPetsHome, root.openPetsHome]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var pets = [root.bundledPetDir]
+        var pets = []
         var lines = String(text || "").trim().split("\n")
         for (var i = 0; i < lines.length; i++) {
           var dir = lines[i].split("\t")[0]
           if (dir && dir !== "") pets.push(dir)
         }
         root.availablePets = pets
-        root.selectNextPet()
+        if (root.scanPurpose === "cycle") {
+          root.selectNextPet()
+          return
+        }
+        if (root.scanPurpose === "resolve") {
+          var want = root.expandHome(root.configuredPet)
+          for (var j = 0; j < pets.length; j++) {
+            if (pets[j].split("/").pop() === want) {
+              root.resolvedBareDir = pets[j]
+              return
+            }
+          }
+          root.petResolveFailed = true
+        }
+        if (pets.length > 0) root.fallbackPetDir = pets[0]
+        else console.info("deskpet: no pets installed; try `npx -y install-pet <id>`")
       }
     }
   }
 
-  function cyclePet() {
+  function scanPets(purpose) {
+    scanPurpose = purpose
     if (!petScanner.running) petScanner.running = true
   }
 
+  function cyclePet() { scanPets("cycle") }
+
   function selectNextPet() {
     var pets = availablePets
-    if (!pets || pets.length < 2) {
+    if (!pets || pets.length === 0) {
+      showBubble("No pets installed yet.")
+      return
+    }
+    if (pets.length < 2) {
       showBubble("No other pets installed yet.")
       return
     }
     var index = pets.indexOf(effectivePetDir)
-    var nextDir = pets[(index + 1) % pets.length]
-    var petPath = nextDir === bundledPetDir ? "" : nextDir
     var entry = { id: "deskpet" }
     for (var key in entrySettings)
       if (key !== "id") entry[key] = entrySettings[key]
-    entry.petPath = petPath
+    entry.petPath = pets[(index + 1) % pets.length]
     if (!(shell && typeof shell.updateEntryInline === "function"
           && shell.updateEntryInline("deskpet", entry)))
       console.warn("deskpet: could not persist pet selection")
   }
 
-  Component.onCompleted: advanceBehavior()
+  Component.onCompleted: {
+    advanceBehavior()
+    resolveConfiguredPet()
+  }
 
   onPetAvailableChanged: {
     if (petAvailable && !greeted) {
@@ -371,6 +423,17 @@ Item {
     function hide(): string { root.petVisible = false; return "ok" }
     function state(): string { return root.agentState + ":" + root.action + ":" + root.petName }
     function ping(): string { return "ok" }
+    function debug(): string {
+      return JSON.stringify({
+        running: petScanner.running,
+        cmd: petScanner.command,
+        pets: root.availablePets,
+        purpose: root.scanPurpose,
+        dir: root.effectivePetDir,
+        bare: root.resolvedBareDir,
+        avail: root.petAvailable
+      })
+    }
   }
 
   // ------------------------------------------------------------- window
@@ -378,8 +441,9 @@ Item {
   PanelWindow {
     id: panel
     visible: root.petVisible && root.petAvailable
-    anchors { left: true; right: true; bottom: true }
-    implicitHeight: root.stripHeight
+    // Full-screen so the pet can be dragged anywhere; the mask keeps
+    // everything except the sprite itself click-through.
+    anchors { left: true; right: true; top: true; bottom: true }
     color: "transparent"
     WlrLayershell.namespace: "deskpet"
     // Top, not Overlay: fullscreen apps and the lock screen should cover
@@ -495,7 +559,10 @@ Item {
       height: bubbleText.implicitHeight + Style.space(12)
       x: Math.max(8, Math.min(panel.width - width - 8,
            petBody.x + (root.frameW - width) / 2))
-      y: petBody.y - height - Style.space(8)
+      // Above the pet normally; below it when dragged near the top edge.
+      y: petBody.y - height - Style.space(8) < 8
+           ? petBody.y + root.frameH + Style.space(8)
+           : petBody.y - height - Style.space(8)
       radius: Style.cornerRadius
       color: Util.alpha(Color.background, 0.95)
       border.width: Math.max(1, Style.space(1))
