@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Install a pet package for deskpet.
+#
+#   install-pet <openpets-id>     e.g. install-pet fenne-fox
+#   install-pet <zip-url>         any URL to a pet ZIP (pet.json + spritesheet)
+#
+# Pets land in ~/.local/share/deskpet/pets/<id>/. The OpenPets catalog is
+# queried at openpets.dev; ZIPs are validated to contain pet.json and a
+# spritesheet, and extraction refuses path-escaping entries.
+set -euo pipefail
+
+die() { echo "install-pet: $1" >&2; exit 1; }
+
+arg="${1:-}"
+[[ -n $arg ]] || die "usage: install-pet <openpets-id | zip-url>"
+command -v curl >/dev/null || die "curl is required"
+command -v jq >/dev/null || die "jq is required"
+command -v unzip >/dev/null || die "unzip is required"
+
+pets_home="${XDG_DATA_HOME:-$HOME/.local/share}/deskpet/pets"
+mkdir -p "$pets_home"
+
+zip_url=""
+pet_id=""
+if [[ $arg == http://* || $arg == https://* ]]; then
+  zip_url="$arg"
+  pet_id=$(basename "$arg" .zip)
+else
+  [[ $arg =~ ^[a-z0-9][a-z0-9_-]{0,63}$ ]] || die "invalid pet id: $arg"
+  pet_id="$arg"
+  echo "Searching the OpenPets catalog for '$pet_id'..."
+  catalog="https://openpets.dev/pets/catalog.v3.json"
+  pages=$(curl -fsSL --max-time 20 "$catalog" | jq -r '.pages[]') || die "could not fetch catalog"
+  for page in $pages; do
+    zip_url=$(curl -fsSL --max-time 20 "$page" \
+      | jq -r --arg id "$pet_id" '.pets[]? // .[]? | select(.id == $id) | .zip // empty' \
+      2>/dev/null | head -n1)
+    [[ -n $zip_url ]] && break
+  done
+  [[ -n $zip_url ]] || die "pet '$pet_id' not found in the OpenPets catalog"
+fi
+
+work_dir=$(mktemp -d)
+trap 'rm -rf "$work_dir"' EXIT
+
+echo "Downloading $zip_url"
+curl -fsSL --max-time 120 --max-filesize 52428800 -o "$work_dir/pet.zip" "$zip_url" \
+  || die "download failed"
+
+# Refuse archives with absolute paths or traversal before extracting.
+if unzip -l "$work_dir/pet.zip" | awk '{print $4}' | grep -Eq '^/|(^|/)\.\.(/|$)'; then
+  die "archive contains unsafe paths"
+fi
+unzip -q "$work_dir/pet.zip" -d "$work_dir/pet" || die "extraction failed"
+
+# pet.json may sit at the ZIP root or one directory down.
+manifest=$(find "$work_dir/pet" -maxdepth 2 -name pet.json | head -n1)
+[[ -n $manifest ]] || die "no pet.json in archive"
+src_dir=$(dirname "$manifest")
+sheet=$(jq -r '.spritesheetPath // "spritesheet.webp"' "$manifest")
+[[ $sheet != /* && $sheet != *..* ]] || die "unsafe spritesheetPath in pet.json"
+[[ -f "$src_dir/$sheet" ]] || die "spritesheet '$sheet' missing from archive"
+
+id=$(jq -r '.id // empty' "$manifest")
+[[ $id =~ ^[a-z0-9][a-z0-9_-]{0,63}$ ]] || id="$pet_id"
+dest="$pets_home/$id"
+
+rm -rf "$dest.tmp"
+mv "$src_dir" "$dest.tmp"
+rm -rf "$dest"
+mv "$dest.tmp" "$dest"
+
+name=$(jq -r '.displayName // .id' "$dest/pet.json")
+echo "Installed '$name' -> $dest"
+echo "Right-click your pet (or run: omarchy-shell deskpet next) to switch to it."
+command -v omarchy-shell >/dev/null 2>&1 && omarchy-shell -q deskpet say "New friend installed: $name" || true

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "deskpet",
+  "name": "Deskpet",
+  "version": "0.1.0",
+  "author": "lemon",
+  "license": "MIT",
+  "description": "A desktop companion that roams the bottom of your screen and reacts to your coding agents. Compatible with OpenPets / Codex / Petdex pet packages.",
+  "kinds": ["panel"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "Panel.qml"
+  }
+}

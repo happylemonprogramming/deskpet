@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# List installed pet packages, one per line: <dir>\t<display-name>
+# Scans every directory argument for subdirectories containing pet.json.
+set -euo pipefail
+
+for base in "$@"; do
+  [[ -d $base ]] || continue
+  for dir in "$base"/*/; do
+    dir="${dir%/}"
+    [[ -f "$dir/pet.json" ]] || continue
+    name=$(jq -r '.displayName // .id // empty' "$dir/pet.json" 2>/dev/null || true)
+    printf '%s\t%s\n' "$dir" "${name:-$(basename "$dir")}"
+  done
+done

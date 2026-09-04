@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Agent hook: translate a coding-agent lifecycle event into deskpet state.
+#
+#   deskpet-hook <event> [agent]     (payload JSON on stdin, may be empty)
+#
+# Events: session-start session-end prompt tool-start tool-end permission
+#         stop error
+#
+# Fire-and-forget by design: pushes the state over shell IPC for instant
+# reaction, and records it in a status file the pet also watches, so a shell
+# restart or missed IPC never leaves the pet wrong for long. Never blocks or
+# fails the calling agent.
+set -uo pipefail
+
+event="${1:-}"
+agent="${2:-agent}"
+
+case "$event" in
+  prompt|tool-start|tool-end) state="working" ;;
+  permission) state="waiting" ;;
+  stop) state="success" ;;
+  error) state="error" ;;
+  session-start|session-end) state="idle" ;;
+  *) printf '{}\n'; exit 0 ;;
+esac
+
+payload=$(cat 2>/dev/null || true)
+detail=""
+if command -v jq >/dev/null 2>&1 && [[ -n $payload ]]; then
+  detail=$(printf '%s' "$payload" | jq -r '
+    .tool_name // .toolName // .tool.name // .notification_type // .reason // empty
+  ' 2>/dev/null || true)
+fi
+
+# Instant path: IPC into the running shell (quiet, bounded by its own timeout).
+command -v omarchy-shell >/dev/null 2>&1 \
+  && omarchy-shell -q deskpet "$state" "$detail" >/dev/null 2>&1 || true
+
+# Durable path: atomic status file.
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/deskpet"
+state_file="$state_dir/status.json"
+mkdir -p "$state_dir" 2>/dev/null || { printf '{}\n'; exit 0; }
+
+tmp_file="$state_file.$$"
+if command -v jq >/dev/null 2>&1; then
+  jq -n \
+    --arg agent "$agent" --arg state "$state" \
+    --arg event "$event" --arg detail "$detail" \
+    --argjson updatedAtEpoch "$(date +%s)" \
+    '{schemaVersion: 1, agent: $agent, state: $state, event: $event,
+      detail: $detail, updatedAtEpoch: $updatedAtEpoch}' >"$tmp_file" 2>/dev/null \
+    && mv -f "$tmp_file" "$state_file" 2>/dev/null
+else
+  printf '{"schemaVersion":1,"agent":"%s","state":"%s","event":"%s","detail":"","updatedAtEpoch":%s}\n' \
+    "$agent" "$state" "$event" "$(date +%s)" >"$tmp_file" 2>/dev/null \
+    && mv -f "$tmp_file" "$state_file" 2>/dev/null
+fi
+rm -f "$tmp_file" 2>/dev/null || true
+
+# Hook protocols that parse stdout accept an empty JSON response as a no-op.
+printf '{}\n'
+exit 0
