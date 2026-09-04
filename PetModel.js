@@ -1,4 +1,4 @@
-// Pure model data for the deskpet: atlas layout, behavior policies, speech.
+// Pure model data for the deskpet: atlas layout and behavior policies.
 //
 // Sprite format: the Codex/OpenPets V1 atlas — 8 columns of 192x208 frames,
 // nine rows in a fixed order. V2 atlases add two gaze rows below but keep
@@ -77,22 +77,6 @@ function actionDuration(agentState) {
   if (agentState === "waiting") return between(2500, 5000)
   if (agentState === "success") return between(1800, 2600)
   return between(3000, 8500)
-}
-
-// Curated speech pools. Never echo agent output: bubbles only ever show
-// these strings or text passed explicitly through the `say` IPC verb.
-var MESSAGES = {
-  hello:   ["Hi! I live here now.", "Reporting for duty!", "What are we building today?", "*stretches*"],
-  success: ["Done!", "All green!", "Shipped it!", "Nailed it.", "That went well!"],
-  error:   ["Uh oh.", "That broke.", "Red. Very red.", "We do not talk about that build.", "Hmm. Not our best."],
-  waiting: ["Your turn!", "Psst - input needed.", "Waiting on you, boss.", "*taps foot*"],
-  pet:     ["Purr...", "Mrrp!", "More pets please.", "That is the spot.", "*happy wiggle*"]
-}
-
-function pickMessage(kind) {
-  var pool = MESSAGES[kind]
-  if (!pool || pool.length === 0) return ""
-  return pool[Math.floor(Math.random() * pool.length)]
 }
 
 // Agent states the pet understands; anything else normalizes to idle.

@@ -9,7 +9,8 @@ no control center. Click-through everywhere except the pet itself.
 - Paces while the agent works, frets and waves when it needs your input
 - Jumps on success, despairs on errors
 - Pet it (click), drag it around (it falls back down with a bounce)
-- Speaks in a themed bubble, never echoing agent output
+- Themed speech bubble driven only by the `say` verb — no canned dialog,
+  never echoing agent output
 
 Compatible with the Codex/OpenPets pet package format, so pets from
 [OpenPets](https://openpets.dev), [Petdex](https://petdex.dev), and
@@ -43,7 +44,7 @@ and its own installer (`~/.local/share/deskpet/pets`).
 
 | Input | Effect |
 |---|---|
-| Left click | Pet it (hearts) |
+| Left click | Pet it (it waves back) |
 | Drag | Carry it anywhere on screen; it bounces back down to the floor |
 | Right click | Switch to the next installed pet |
 | Middle click | Preview the success reaction |
@@ -58,11 +59,15 @@ omarchy-shell deskpet working ""    # drive states manually:
                                     # idle|working|waiting|success|error
 ```
 
-Bind a toggle in `~/.config/hypr/bindings.lua`:
+Bind a toggle in `~/.config/hypr/bindings.lua` (SUPER+ALT+P is free of
+conflicts with Omarchy's default keybindings):
 
 ```lua
-o.bind("SUPER SHIFT", "Y", "Toggle deskpet", "omarchy-shell deskpet toggle")
+o.bind("SUPER + ALT + P", "Toggle deskpet", "omarchy-shell -q deskpet toggle")
 ```
+
+Hiding is free: when toggled off, the pet's window surface is destroyed and
+every timer in the plugin stops, so it costs zero CPU and zero rendering.
 
 ## Agent hooks
 

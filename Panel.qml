@@ -126,9 +126,8 @@ Item {
   property int spriteRow: 0
   property int spriteFrames: 6
   property int spriteFrameMs: 170
-  property bool greeted: false
 
-  readonly property real frameH: 140 * petScale
+  readonly property real frameH: 112 * petScale
   readonly property real frameW: frameH * PetModel.FRAME_W / PetModel.FRAME_H
   // The frameIntervalMs setting acts as a speed scale relative to the
   // per-animation defaults (140 = normal speed).
@@ -151,9 +150,20 @@ Item {
   }
 
   function advanceBehavior() {
-    if (dragArea.drag.active) return
+    if (!petVisible || dragArea.drag.active) return
     setAction(PetModel.pickAction(agentState))
     scheduleNextAction()
+  }
+
+  // Hidden means dormant: every repeating timer in this file is gated on
+  // petVisible (directly or via this handler), and the PanelWindow surface
+  // is destroyed, so a hidden pet costs nothing at all.
+  onPetVisibleChanged: {
+    if (petVisible) advanceBehavior()
+    else {
+      behaviorTimer.stop()
+      bubble.shown = false
+    }
   }
 
   function setAgentState(state, detail, holdMs, epoch) {
@@ -168,15 +178,12 @@ Item {
 
     if (state === "success") {
       setAction("jump")
-      if (changed) showBubble(PetModel.pickMessage("success"))
       scheduleNextAction()
     } else if (state === "error") {
       setAction("crash")
-      if (changed) showBubble(PetModel.pickMessage("error"))
       scheduleNextAction()
     } else if (state === "waiting") {
       setAction("fret")
-      if (changed) showBubble(PetModel.pickMessage("waiting"))
       scheduleNextAction()
     } else if (changed) {
       advanceBehavior()
@@ -191,10 +198,11 @@ Item {
     bubbleTimer.restart()
   }
 
+  // Clicking just plays the pet's own wave animation: no bubbles or effect
+  // overlays, since installed pets can be anything from kittens to dark
+  // mages and canned reactions won't fit them all.
   function petThePet() {
     setAction("wave")
-    showBubble(PetModel.pickMessage("pet"))
-    heartBurst.restart()
     scheduleNextAction()
   }
 
@@ -275,7 +283,7 @@ Item {
   Timer {
     interval: 60000
     repeat: true
-    running: root.agentState === "working" || root.agentState === "waiting"
+    running: root.petVisible && (root.agentState === "working" || root.agentState === "waiting")
     onTriggered: {
       if (Date.now() / 1000 - root.lastStatusEpoch > 900)
         root.setAgentState("idle", "", 0)
@@ -383,12 +391,7 @@ Item {
     scanPets("apply")
   }
 
-  onPetAvailableChanged: {
-    if (petAvailable && !greeted) {
-      greeted = true
-      showBubble(PetModel.pickMessage("hello"))
-    }
-  }
+
 
   // ---------------------------------------------------------------- IPC
 
@@ -467,29 +470,6 @@ Item {
           mipmap: true
           asynchronous: true
           visible: root.petAvailable
-        }
-      }
-
-      // Floating heart shown when the pet is petted.
-      Text {
-        id: heart
-        text: "\u2764"
-        color: "#e0507a"
-        font.pixelSize: Math.round(20 * root.petScale)
-        anchors.horizontalCenter: parent.horizontalCenter
-        y: 0
-        opacity: 0
-
-        SequentialAnimation {
-          id: heartBurst
-          ParallelAnimation {
-            NumberAnimation { target: heart; property: "y"; from: 4; to: -34 * root.petScale; duration: 900; easing.type: Easing.OutCubic }
-            SequentialAnimation {
-              NumberAnimation { target: heart; property: "opacity"; from: 0; to: 1; duration: 150 }
-              PauseAnimation { duration: 450 }
-              NumberAnimation { target: heart; property: "opacity"; to: 0; duration: 300 }
-            }
-          }
         }
       }
 
