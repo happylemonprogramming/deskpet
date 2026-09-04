@@ -120,6 +120,25 @@ Stored inline on the plugin entry in `~/.config/omarchy/shell.json`
   folder path; defaults to `cloud-puff`. If the configured pet is not
   installed, deskpet adopts the first installed pet it finds.
 
+## Uninstall
+
+```bash
+omarchy plugin remove deskpet --yes
+```
+
+Optional cleanup — deskpet never touches these without you:
+
+```bash
+rm -rf ~/.local/share/deskpet              # pets installed by the bundled script
+rm -rf ~/.local/state/omarchy/deskpet      # agent status file
+rm ~/.config/opencode/plugin/opencode-deskpet.js   # if you linked the opencode integration
+```
+
+Pets under `~/.config/OpenPets/pets` belong to the OpenPets CLI and pets
+under `~/.config/omapets/pets` to the OmaPets widget; remove those with
+their own tools if you no longer want them. If you added Claude Code hooks
+from this README, delete those entries from `~/.claude/settings.json`.
+
 ## Credits
 
 - Sprite format and reaction taxonomy from the
