@@ -62,72 +62,57 @@ Item {
     return value
   }
 
-  // No pet ships with the plugin: when petPath is empty or the configured
-  // pet is not installed, we adopt the first pet found in the scan
-  // directories. A bare id is resolved by the scanner, which lists every
-  // installed pet dir in priority order: ours, OmaPets', the OpenPets CLI's.
-  property string fallbackPetDir: ""
-  property string resolvedBareDir: ""
-  property bool petResolveFailed: false
-  readonly property string effectivePetDir: {
-    var p = expandHome(configuredPet)
-    if (p === "" || petResolveFailed) return fallbackPetDir
-    if (p.indexOf("/") < 0) return resolvedBareDir
-    return p.replace(/\/$/, "")
-  }
-
-  function resolveConfiguredPet() {
-    var p = expandHome(configuredPet)
-    if (p === "") scanPets("adopt")
-    else if (p.indexOf("/") < 0) scanPets("resolve")
-  }
+  // No pet ships with the plugin. The scanner is the single source of truth:
+  // it lists every installed pet (dir, name, spritesheet, atlas version)
+  // across the pets directories in priority order (ours, OmaPets', the
+  // OpenPets CLI's). The configured pet is matched against that list; a
+  // missing pet falls back to the first installed one.
+  property var petRecords: []
+  property string appliedPetDir: ""
 
   property bool petAvailable: false
   property string petName: ""
   property int atlasRows: 9
   property url spritesheetUrl: ""
 
-  onConfiguredPetChanged: {
-    petResolveFailed = false
-    resolvedBareDir = ""
-    resolveConfiguredPet()
+  onConfiguredPetChanged: scanPets("apply")
+
+  function applyPetRecord(rec) {
+    if (!rec) {
+      petAvailable = false
+      petName = ""
+      spritesheetUrl = ""
+      appliedPetDir = ""
+      return
+    }
+    var sheet = String(rec.sheet || "spritesheet.webp")
+    if (sheet.indexOf("..") >= 0 || sheet.charAt(0) === "/") {
+      console.warn("deskpet: spritesheetPath must stay inside the pet folder:", rec.dir)
+      applyPetRecord(null)
+      return
+    }
+    appliedPetDir = rec.dir
+    petName = rec.name
+    atlasRows = rec.version >= 2 ? 11 : 9
+    spritesheetUrl = "file://" + rec.dir + "/" + sheet
+    petAvailable = true
   }
 
-  Loader {
-    id: petManifestLoader
-    active: root.effectivePetDir !== ""
-
-    sourceComponent: FileView {
-      path: "file://" + root.effectivePetDir + "/pet.json"
-      watchChanges: true
-      printErrors: false
-      onFileChanged: reload()
-      onLoadFailed: {
-        root.petAvailable = false
-        root.spritesheetUrl = ""
-        // Configured pet is not installed anywhere: adopt any installed pet.
-        if (!root.petResolveFailed && root.expandHome(root.configuredPet) !== "") {
-          root.petResolveFailed = true
-          root.scanPets("adopt")
-        }
+  // The record the current settings ask for; adopts the first installed pet
+  // when petPath is empty or points at something not installed.
+  function desiredPetRecord() {
+    var records = petRecords
+    if (records.length === 0) return null
+    var p = expandHome(configuredPet).replace(/\/$/, "")
+    if (p !== "") {
+      for (var i = 0; i < records.length; i++) {
+        if (records[i].dir === p
+            || (p.indexOf("/") < 0 && records[i].dir.split("/").pop() === p))
+          return records[i]
       }
-      onLoaded: {
-        try {
-          var pet = JSON.parse(String(text() || "{}"))
-          var sheet = String(pet.spritesheetPath || "spritesheet.webp")
-          if (sheet.indexOf("..") >= 0 || sheet.charAt(0) === "/")
-            throw new Error("spritesheetPath must stay inside the pet folder")
-          root.petName = String(pet.displayName || pet.id || "Pet")
-          root.atlasRows = Number(pet.spriteVersionNumber || 1) >= 2 ? 11 : 9
-          root.spritesheetUrl = "file://" + root.effectivePetDir + "/" + sheet
-          root.petAvailable = true
-        } catch (error) {
-          console.warn("deskpet: invalid pet manifest at", root.effectivePetDir, error)
-          root.petAvailable = false
-          root.spritesheetUrl = ""
-        }
-      }
+      console.info("deskpet: configured pet not installed, adopting", records[0].dir)
     }
+    return records[0]
   }
 
   // ------------------------------------------------------------ pet state
@@ -329,8 +314,7 @@ Item {
 
   // ------------------------------------------------------- pet switching
 
-  property var availablePets: []
-  property string scanPurpose: "cycle"
+  property string scanPurpose: "apply"
 
   Process {
     id: petScanner
@@ -339,29 +323,38 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var pets = []
+        var records = []
         var lines = String(text || "").trim().split("\n")
         for (var i = 0; i < lines.length; i++) {
-          var dir = lines[i].split("\t")[0]
-          if (dir && dir !== "") pets.push(dir)
+          var fields = lines[i].split("\t")
+          if (!fields[0]) continue
+          records.push({
+            dir: fields[0],
+            name: fields[1] || fields[0].split("/").pop(),
+            sheet: fields[2] || "spritesheet.webp",
+            version: Number(fields[3]) || 1
+          })
         }
-        root.availablePets = pets
-        if (root.scanPurpose === "cycle") {
-          root.selectNextPet()
+        root.petRecords = records
+        if (records.length === 0) {
+          root.applyPetRecord(null)
+          console.info("deskpet: no pets installed; try `npx -y install-pet cloud-puff`")
           return
         }
-        if (root.scanPurpose === "resolve") {
-          var want = root.expandHome(root.configuredPet)
-          for (var j = 0; j < pets.length; j++) {
-            if (pets[j].split("/").pop() === want) {
-              root.resolvedBareDir = pets[j]
-              return
-            }
+        if (root.scanPurpose === "cycle") {
+          if (records.length < 2) {
+            root.showBubble("No other pets installed yet.")
+            return
           }
-          root.petResolveFailed = true
+          var index = -1
+          for (var j = 0; j < records.length; j++)
+            if (records[j].dir === root.appliedPetDir) index = j
+          var next = records[(index + 1) % records.length]
+          root.applyPetRecord(next)
+          root.persistPetSelection(next.dir)
+          return
         }
-        if (pets.length > 0) root.fallbackPetDir = pets[0]
-        else console.info("deskpet: no pets installed; try `npx -y install-pet <id>`")
+        root.applyPetRecord(root.desiredPetRecord())
       }
     }
   }
@@ -373,29 +366,21 @@ Item {
 
   function cyclePet() { scanPets("cycle") }
 
-  function selectNextPet() {
-    var pets = availablePets
-    if (!pets || pets.length === 0) {
-      showBubble("No pets installed yet.")
-      return
-    }
-    if (pets.length < 2) {
-      showBubble("No other pets installed yet.")
-      return
-    }
-    var index = pets.indexOf(effectivePetDir)
+  function persistPetSelection(dir) {
     var entry = { id: "deskpet" }
     for (var key in entrySettings)
       if (key !== "id") entry[key] = entrySettings[key]
-    entry.petPath = pets[(index + 1) % pets.length]
-    if (!(shell && typeof shell.updateEntryInline === "function"
-          && shell.updateEntryInline("deskpet", entry)))
-      console.warn("deskpet: could not persist pet selection")
+    entry.petPath = dir
+    // A false return only means the config already pointed at this pet; the
+    // switch itself was already applied directly.
+    if (shell && typeof shell.updateEntryInline === "function")
+      shell.updateEntryInline("deskpet", entry)
+    else console.warn("deskpet: cannot persist pet selection")
   }
 
   Component.onCompleted: {
     advanceBehavior()
-    resolveConfiguredPet()
+    scanPets("apply")
   }
 
   onPetAvailableChanged: {
@@ -426,11 +411,10 @@ Item {
     function debug(): string {
       return JSON.stringify({
         running: petScanner.running,
-        cmd: petScanner.command,
-        pets: root.availablePets,
         purpose: root.scanPurpose,
-        dir: root.effectivePetDir,
-        bare: root.resolvedBareDir,
+        records: root.petRecords,
+        applied: root.appliedPetDir,
+        configured: root.configuredPet,
         avail: root.petAvailable
       })
     }

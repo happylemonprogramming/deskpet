@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# List installed pet packages, one per line: <dir>\t<display-name>
+# List installed pet packages, one per line:
+#   <dir>\t<display-name>\t<spritesheet-path>\t<sprite-version>
 # Scans every directory argument for subdirectories containing pet.json.
 set -euo pipefail
 
@@ -8,7 +9,13 @@ for base in "$@"; do
   for dir in "$base"/*/; do
     dir="${dir%/}"
     [[ -f "$dir/pet.json" ]] || continue
-    name=$(jq -r '.displayName // .id // empty' "$dir/pet.json" 2>/dev/null || true)
-    printf '%s\t%s\n' "$dir" "${name:-$(basename "$dir")}"
+    line=$(jq -r '[
+      (.displayName // .id // ""),
+      (.spritesheetPath // "spritesheet.webp"),
+      ((.spriteVersionNumber // 1) | tostring)
+    ] | join("\t")' "$dir/pet.json" 2>/dev/null || true)
+    [[ -n $line ]] || line=$'\t'"spritesheet.webp"$'\t'"1"
+    name="${line%%$'\t'*}"
+    printf '%s\t%s\n' "$dir" "${name:-$(basename "$dir")}${line#"$name"}"
   done
 done
